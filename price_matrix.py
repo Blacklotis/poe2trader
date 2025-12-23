@@ -1,17 +1,31 @@
 import argparse
-import os
 from typing import List, Optional
 
-from matrix_export import (
-    DEFAULT_SHEET_TITLE,
-    export_matrix_to_sheet,
-    load_matrix_from_cache,
-    load_sheet_id,
+from matrix_export import export_matrix_to_sheet, load_matrix_from_cache, load_sheet_id
+from project_config import (
+    PROJECT_PATH,
+    SHEET_NAME_DEFAULT,
+    SHEET_SERVICE_ACCOUNT_PATH,
+    SHEET_TITLE_DEFAULT,
+    load_currencies,
 )
-from project_config import PROJECT_PATH, WEB_STUFF_DIR, load_currencies
 
 
-DEFAULT_SERVICE_ACCOUNT = os.path.join(WEB_STUFF_DIR, "poe2trader-2e14fc353067.json")
+DEFAULT_SERVICE_ACCOUNT = SHEET_SERVICE_ACCOUNT_PATH
+
+
+def _load_or_init_matrix(limit: int = 0) -> tuple[List[str], List[List[Optional[float]]]]:
+    cached = load_matrix_from_cache()
+    if cached:
+        currencies, matrix = cached
+    else:
+        currencies = load_currencies(PROJECT_PATH)
+        size = len(currencies)
+        matrix = [[None for _ in range(size)] for _ in range(size)]
+    if limit and limit > 0:
+        currencies = currencies[:limit]
+        matrix = [row[: len(currencies)] for row in matrix[: len(currencies)]]
+    return currencies, matrix
 
 
 def export_cached_matrix(
@@ -23,16 +37,7 @@ def export_cached_matrix(
     apply_format: bool,
     limit: int = 0,
 ) -> str:
-    cached = load_matrix_from_cache()
-    if cached:
-        currencies, matrix = cached
-    else:
-        currencies = load_currencies(PROJECT_PATH)
-        size = len(currencies)
-        matrix = [[None for _ in range(size)] for _ in range(size)]
-    if limit and limit > 0:
-        currencies = currencies[: limit]
-        matrix = [row[: len(currencies)] for row in matrix[: len(currencies)]]
+    currencies, matrix = _load_or_init_matrix(limit)
     return export_matrix_to_sheet(
         currencies,
         matrix,
@@ -53,22 +58,12 @@ def main() -> None:
     parser.add_argument("--oauth-client", default="", help="Path to OAuth client JSON.")
     parser.add_argument("--service-account", default=DEFAULT_SERVICE_ACCOUNT, help="Path to service account JSON.")
     parser.add_argument("--sheet-id", default="", help="Existing spreadsheet ID.")
-    parser.add_argument("--sheet-name", default="Sheet1")
-    parser.add_argument("--sheet-title", default=DEFAULT_SHEET_TITLE)
+    parser.add_argument("--sheet-name", default=SHEET_NAME_DEFAULT)
+    parser.add_argument("--sheet-title", default=SHEET_TITLE_DEFAULT)
     parser.add_argument("--no-format", action="store_true", help="Disable sheet formatting.")
     args = parser.parse_args()
 
-    cached = load_matrix_from_cache()
-    if cached:
-        currencies, matrix = cached
-    else:
-        currencies = load_currencies(PROJECT_PATH)
-        size = len(currencies)
-        matrix: List[List[Optional[float]]] = [[None for _ in range(size)] for _ in range(size)]
-
-    if args.limit and args.limit > 0:
-        currencies = currencies[: args.limit]
-        matrix = [row[: len(currencies)] for row in matrix[: len(currencies)]]
+    currencies, matrix = _load_or_init_matrix(args.limit)
 
     if args.no_gsheet:
         raise SystemExit("Google Sheets export disabled.")

@@ -3,7 +3,7 @@ import time
 from dataclasses import dataclass
 from typing import Any, Dict, Iterable, List, Optional
 
-from input_actions import click, type_text
+from input_core import click, type_text
 
 
 @dataclass(frozen=True)

@@ -1,66 +1,57 @@
 {
   "ratios": [
     {
-      "name": "market",
-      "x": 2100,
+      "x": 2060,
       "y": 304,
-      "w": 80,
-      "h": 25,
-      "position": [
-        0,
-        1
-      ],
+      "w": 115,
+      "h": 30,
       "ocr_mode": "multi",
       "scale": 3.0,
       "decimal_rule": "",
-      "expected_integer_only": true,
+      "expected_integer_only": false,
       "expected_min": 2,
       "expected_max": 1000,
-      "debug_output": true
+      "debug_output": false,
+      "buy": "Market",
+      "sell": "Market"
     },
     {
-      "name": "div_ex",
-      "x": 1910,
+      "x": 1890,
       "y": 580,
-      "w": 60,
+      "w": 80,
       "h": 25,
-      "position": [
-        0,
-        0
-      ],
       "ocr_mode": "multi",
       "scale": 3.0,
       "decimal_rule": "",
       "expected_integer_only": false,
       "expected_min": 200,
       "expected_max": 300,
-      "debug_output": true,
+      "debug_output": false,
       "clean_min_area_ratio": 0.0007,
       "clean_left_margin_ratio": 0.2,
       "clean_left_max_area_ratio": 0.002,
-      "clean_left_max_width": 2
+      "clean_left_max_width": 2,
+      "buy": "Divine Orb",
+      "sell": "Exalted Orb"
     },
     {
-      "name": "gex_ex",
-      "x": 2405,
+      "x": 2385,
       "y": 580,
-      "w": 50,
+      "w": 70,
       "h": 25,
-      "position": [
-        1,
-        0
-      ],
       "ocr_mode": "multi",
       "scale": 3.0,
       "decimal_rule": "tail_zero_two_dp",
       "expected_integer_only": false,
       "expected_min": 1,
       "expected_max": 10,
-      "debug_output": true,
+      "debug_output": false,
       "clean_min_area_ratio": 0.0007,
       "clean_left_margin_ratio": 0.2,
       "clean_left_max_area_ratio": 0.002,
-      "clean_left_max_width": 2
+      "clean_left_max_width": 2,
+      "buy": "Greater Exalted Orb",
+      "sell": "Exalted Orb"
     }
   ],
   "trades": [
@@ -139,9 +130,7 @@
       ]
     }
   ],
-  "triggers": [
-
-  ],
+  "triggers": [],
   "currencies": [
     "Blacksmith's Whetstone",
     "Arcanist's Etcher",

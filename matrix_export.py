@@ -3,12 +3,10 @@ import os
 import time
 from typing import List, Optional
 
-
-BASE_DIR = os.path.dirname(__file__)
-WEB_STUFF_DIR = os.path.join(BASE_DIR, "web_stuff")
+from project_config import SHEET_TITLE_DEFAULT, WEB_STUFF_DIR
 SHEET_ID_PATH = os.path.join(WEB_STUFF_DIR, "price_matrix_sheet.json")
 CACHE_PATH = os.path.join(WEB_STUFF_DIR, "price_matrix_cache.json")
-DEFAULT_SHEET_TITLE = "Price Matrix"
+DEFAULT_SHEET_TITLE = SHEET_TITLE_DEFAULT
 
 
 def _matrix_to_values(currencies: List[str], matrix: List[List[Optional[float]]]) -> List[List[str]]:
