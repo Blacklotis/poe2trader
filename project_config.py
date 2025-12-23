@@ -14,7 +14,6 @@ SHEET_SERVICE_ACCOUNT_PATH = os.path.join(WEB_STUFF_DIR, "poe2trader-2e14fc35306
 SHEET_NAME_DEFAULT = "Sheet1"
 SHEET_TITLE_DEFAULT = "Price Matrix"
 SHEET_UPDATE_EVERY_DEFAULT = 5
-PAIR_LIST_PATH = os.path.join(WEB_STUFF_DIR, "currency_pairs.json")
 
 
 @dataclass(frozen=True)

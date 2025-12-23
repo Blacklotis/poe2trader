@@ -5,34 +5,25 @@ from typing import List, Optional
 
 from project_config import SHEET_TITLE_DEFAULT, WEB_STUFF_DIR
 SHEET_ID_PATH = os.path.join(WEB_STUFF_DIR, "price_matrix_sheet.json")
-CACHE_PATH = os.path.join(WEB_STUFF_DIR, "price_matrix_cache.json")
 DEFAULT_SHEET_TITLE = SHEET_TITLE_DEFAULT
 
 
-def _matrix_to_values(currencies: List[str], matrix: List[List[Optional[float]]]) -> List[List[str]]:
+def _matrix_to_values(
+    col_labels: List[str],
+    matrix: List[List[Optional[float]]],
+    row_labels: Optional[List[str]] = None,
+) -> List[List[str]]:
+    if row_labels is None:
+        row_labels = col_labels
     values: List[List[str]] = []
-    values.append(["Currency"] + currencies)
+    values.append(["Currency"] + col_labels)
     for i, row in enumerate(matrix):
-        out = [currencies[i]]
+        label = row_labels[i] if i < len(row_labels) else ""
+        out = [label]
         for v in row:
             out.append("" if v is None else f"{v:.2f}")
         values.append(out)
     return values
-
-
-def _matrix_to_strings(matrix: List[List[Optional[float]]]) -> List[List[str]]:
-    out: List[List[str]] = []
-    for row in matrix:
-        row_out = []
-        for v in row:
-            if v is None:
-                row_out.append("")
-            elif isinstance(v, (int, float)):
-                row_out.append(f"{v:.2f}")
-            else:
-                row_out.append(str(v))
-        out.append(row_out)
-    return out
 
 
 def _a1(row: int, col: int) -> str:
@@ -52,40 +43,6 @@ def load_sheet_id() -> Optional[str]:
     return str(data.get("spreadsheetId", "")) or None
 
 
-def load_cache() -> Optional[dict]:
-    if not os.path.exists(CACHE_PATH):
-        return None
-    with open(CACHE_PATH, "r", encoding="utf-8") as f:
-        return json.load(f)
-
-
-def save_cache(currencies: List[str], matrix: List[List[Optional[float]]]) -> None:
-    data = {"currencies": currencies, "matrix": _matrix_to_strings(matrix)}
-    with open(CACHE_PATH, "w", encoding="utf-8") as f:
-        json.dump(data, f)
-
-
-def load_matrix_from_cache() -> Optional[tuple[List[str], List[List[Optional[float]]]]]:
-    cached = load_cache()
-    if not cached:
-        return None
-    currencies = [str(c) for c in cached.get("currencies", [])]
-    matrix_str = cached.get("matrix", [])
-    matrix: List[List[Optional[float]]] = []
-    for row in matrix_str:
-        out_row = []
-        for v in row:
-            if v == "" or v is None:
-                out_row.append(None)
-            else:
-                try:
-                    out_row.append(float(v))
-                except Exception:
-                    out_row.append(None)
-        matrix.append(out_row)
-    return currencies, matrix
-
-
 def export_matrix_to_sheet(
     currencies: List[str],
     matrix: List[List[Optional[float]]],
@@ -95,6 +52,7 @@ def export_matrix_to_sheet(
     sheet_name: str,
     sheet_title: str,
     apply_format: bool,
+    row_labels: Optional[List[str]] = None,
 ) -> str:
     try:
         from google.oauth2.credentials import Credentials
@@ -132,13 +90,9 @@ def export_matrix_to_sheet(
             f,
         )
 
-    values = _matrix_to_values(currencies, matrix)
+    values = _matrix_to_values(currencies, matrix, row_labels=row_labels)
     header = values[0]
     data_rows = values[1:]
-    cached = load_cache()
-    currencies_cached = header[1:]
-    matrix_strings = [row[1:] for row in data_rows]
-
     sheet_info = service.spreadsheets().get(
         spreadsheetId=sheet_id,
         ranges=[sheet_name],
@@ -155,34 +109,21 @@ def export_matrix_to_sheet(
 
     top_offset_rows = 5
     timestamp = time.strftime("%Y-%m-%d %H:%M:%S")
-    requests = [{"range": "A1:B1", "values": [["Last Updated", timestamp]]}]
-
-    if not cached or cached.get("currencies") != currencies_cached:
+    requests = [
+        {"range": "A1:B1", "values": [["Last Updated", timestamp]]},
+        {
+            "range": f"A{top_offset_rows + 1}:{_a1(top_offset_rows + 1, len(header))}",
+            "values": [header],
+        },
+    ]
+    if data_rows:
+        end_cell = _a1(top_offset_rows + 1 + len(data_rows), len(header))
         requests.append(
             {
-                "range": f"A{top_offset_rows + 1}:{_a1(top_offset_rows + 1, len(header))}",
-                "values": [header],
+                "range": f"A{top_offset_rows + 2}:{end_cell}",
+                "values": data_rows,
             }
         )
-        if data_rows:
-            end_cell = _a1(top_offset_rows + 1 + len(data_rows), len(header))
-            requests.append(
-                {
-                    "range": f"A{top_offset_rows + 2}:{end_cell}",
-                    "values": data_rows,
-                }
-            )
-    else:
-        old = cached.get("matrix", [])
-        for i, row in enumerate(matrix_strings):
-            old_row = old[i] if i < len(old) else []
-            for j, val in enumerate(row):
-                old_val = old_row[j] if j < len(old_row) else ""
-                if val == old_val:
-                    continue
-                row_idx = top_offset_rows + 2 + i
-                col_idx = 2 + j
-                requests.append({"range": _a1(row_idx, col_idx), "values": [[val]]})
 
     if requests:
         service.spreadsheets().values().batchUpdate(
@@ -208,8 +149,8 @@ def export_matrix_to_sheet(
                 ).execute()
             break
 
-        rows = len(matrix_strings)
-        cols = len(matrix_strings[0]) if matrix_strings else 0
+        rows = len(matrix)
+        cols = len(matrix[0]) if matrix else 0
         if rows and cols:
             requests = [
                 {
@@ -354,5 +295,4 @@ def export_matrix_to_sheet(
                 spreadsheetId=sheet_id, body={"requests": requests}
             ).execute()
 
-    save_cache(currencies_cached, matrix_strings)
     return sheet_id

@@ -14,44 +14,6 @@
       "debug_output": false,
       "buy": "Market",
       "sell": "Market"
-    },
-    {
-      "x": 1890,
-      "y": 580,
-      "w": 80,
-      "h": 25,
-      "ocr_mode": "multi",
-      "scale": 3.0,
-      "decimal_rule": "",
-      "expected_integer_only": false,
-      "expected_min": 200,
-      "expected_max": 300,
-      "debug_output": false,
-      "clean_min_area_ratio": 0.01,
-      "clean_left_margin_ratio": 0.0,
-      "clean_left_max_area_ratio": 0.0,
-      "clean_left_max_width": 2,
-      "buy": "Divine Orb",
-      "sell": "Exalted Orb"
-    },
-    {
-      "x": 2385,
-      "y": 580,
-      "w": 70,
-      "h": 25,
-      "ocr_mode": "multi",
-      "scale": 3.0,
-      "decimal_rule": "tail_zero_two_dp",
-      "expected_integer_only": false,
-      "expected_min": 1,
-      "expected_max": 10,
-      "debug_output": false,
-      "clean_min_area_ratio": 0.0007,
-      "clean_left_margin_ratio": 0.2,
-      "clean_left_max_area_ratio": 0.002,
-      "clean_left_max_width": 2,
-      "buy": "Greater Exalted Orb",
-      "sell": "Exalted Orb"
     }
   ],
   "trades": [
@@ -62,31 +24,50 @@
         {
           "type": "click",
           "x": 2440,
+          "y": 170,
+          "button": "left",
+          "modifiers": []
+        },
+        {
+          "type": "delay",
+          "seconds": 0.25
+        },
+        {
+          "type": "click",
+          "x": 2440,
           "y": 315,
           "button": "left",
           "modifiers": []
         },
         {
+          "type": "delay",
+          "seconds": 0.25
+        },
+        {
           "type": "click",
-          "x": 2215,
+          "x": 2325,
           "y": 1250,
           "button": "left",
           "modifiers": []
         },
         {
+          "type": "delay",
+          "seconds": 0.25
+        },
+        {
           "type": "type",
           "text": "{itemName}",
           "method": "paste",
-          "key_delay_sec": 0.01
+          "key_delay_sec": 0.1
         },
         {
           "type": "delay",
-          "seconds": 0.5
+          "seconds": 0.25
         },
         {
           "type": "click",
-          "x": 2250,
-          "y": 250,
+          "x": 2325,
+          "y": 260,
           "button": "left",
           "modifiers": []
         }
@@ -98,36 +79,59 @@
       "actions": [
         {
           "type": "click",
+          "x": 2440,
+          "y": 170,
+          "button": "left",
+          "modifiers": []
+        },
+        {
+          "type": "delay",
+          "seconds": 0.25
+        },
+        {
+          "type": "click",
           "x": 1750,
           "y": 315,
           "button": "left",
           "modifiers": []
         },
         {
+          "type": "delay",
+          "seconds": 0.25
+        },
+        {
           "type": "click",
-          "x": 2215,
+          "x": 2325,
           "y": 1250,
           "button": "left",
           "modifiers": []
         },
         {
+          "type": "delay",
+          "seconds": 0.25
+        },
+        {
           "type": "type",
           "text": "{itemName}",
           "method": "paste",
-          "key_delay_sec": 0.01
+          "key_delay_sec": 0.1
         },
         {
           "type": "delay",
-          "seconds": 0.5
+          "seconds": 0.25
         },
         {
           "type": "click",
-          "x": 2275,
-          "y": 250,
+          "x": 2325,
+          "y": 260,
           "button": "left",
           "modifiers": []
         }
       ]
+    },
+    {
+      "name": "update_sheet",
+      "actions": []
     }
   ],
   "triggers": [],

@@ -8,7 +8,6 @@ import numpy as np
 import pytesseract
 import tkinter as tk
 
-from price_matrix import export_cached_matrix
 from project_config import (
     DEBUG_DIR,
     DEBUG_DUMP_DEFAULT,
@@ -19,14 +18,13 @@ from project_config import (
     SHEET_SERVICE_ACCOUNT_PATH,
     SHEET_TITLE_DEFAULT,
     SHEET_UPDATE_EVERY_DEFAULT,
-    WEB_STUFF_DIR,
     load_currencies,
     load_ratio_regions,
     load_triggers,
 )
 from trades import TradeRunner
 from ocr_utils import compute_display, format_decimals, get_ocr_preps, prep_for_ocr, read_ratio_from_image
-from matrix_export import export_matrix_to_sheet, load_matrix_from_cache, load_sheet_id
+from matrix_export import export_matrix_to_sheet, load_sheet_id
 
 DEBUG_DUMP = DEBUG_DUMP_DEFAULT
 DEBUG_DUMP_INTERVAL_SEC = DEBUG_DUMP_INTERVAL_SEC_DEFAULT
@@ -35,6 +33,10 @@ SHEET_SERVICE_ACCOUNT = SHEET_SERVICE_ACCOUNT_PATH
 SHEET_NAME = SHEET_NAME_DEFAULT
 SHEET_TITLE = SHEET_TITLE_DEFAULT
 SHEET_UPDATE_EVERY = SHEET_UPDATE_EVERY_DEFAULT
+TARGET_COLUMNS = ("Divine Orb", "Exalted Orb")
+AUTOMATION_SETTLE_SEC = 0.4
+SELECT_SELL_TRADE = "select_sell"
+SELECT_BUY_TRADE = "select_buy"
 HELP_TEXT = """Usage:
   python main.py [--help]
 
@@ -129,18 +131,23 @@ def _create_overlay(ratios: Tuple[NamedRect, ...], existing: Optional[tk.Tk]) ->
     return new_overlay
 
 
-def _load_or_init_matrix(currencies: list[str]) -> list[list[Optional[float]]]:
-    cached = load_matrix_from_cache()
-    if cached:
-        cached_currencies, matrix = cached
-        if cached_currencies == currencies:
-            return matrix
-    size = len(currencies)
-    return [[None for _ in range(size)] for _ in range(size)]
+def _load_or_init_matrix(rows: list[str], cols: list[str]) -> list[list[Optional[float]]]:
+    return [[None for _ in range(len(cols))] for _ in range(len(rows))]
 
 
-def _currency_index_map(currencies: list[str]) -> dict[str, int]:
-    return {str(name): idx for idx, name in enumerate(currencies)}
+def _index_map(values: list[str]) -> dict[str, int]:
+    return {str(name): idx for idx, name in enumerate(values)}
+
+
+def _build_matrix_layout(currencies: list[str]) -> tuple[list[str], list[str]]:
+    target_set = set(TARGET_COLUMNS)
+    row_labels = [c for c in currencies if c not in target_set]
+    col_labels = list(TARGET_COLUMNS)
+    return row_labels, col_labels
+
+
+def _build_pairs(row_labels: list[str], col_labels: list[str]) -> list[tuple[str, str]]:
+    return [(row, col) for col in col_labels for row in row_labels]
 
 
 def _reload_config_if_changed(
@@ -166,10 +173,13 @@ def _reload_config_if_changed(
         print(f"Failed to reload config: {exc}")
         return last_mtime, overlay, None
 
-    matrix = _load_or_init_matrix(currencies)
-    currency_map = _currency_index_map(currencies)
+    row_labels, col_labels = _build_matrix_layout(currencies)
+    matrix = _load_or_init_matrix(row_labels, col_labels)
+    row_map = _index_map(row_labels)
+    col_map = _index_map(col_labels)
+    pairs = _build_pairs(row_labels, col_labels)
     overlay = _create_overlay(ratios, overlay)
-    state = (ratios, triggers, currencies, matrix, currency_map)
+    state = (ratios, triggers, currencies, row_labels, col_labels, matrix, row_map, col_map, pairs)
     return mtime, overlay, state
 
 
@@ -178,8 +188,13 @@ def main():
     ratios = load_ratio_regions(PROJECT_PATH)
     triggers = load_triggers(PROJECT_PATH)
     currencies = load_currencies(PROJECT_PATH)
-    matrix = _load_or_init_matrix(currencies)
-    currency_map = _currency_index_map(currencies)
+    row_labels, col_labels = _build_matrix_layout(currencies)
+    matrix = _load_or_init_matrix(row_labels, col_labels)
+    row_map = _index_map(row_labels)
+    col_map = _index_map(col_labels)
+    pairs = _build_pairs(row_labels, col_labels)
+    pair_index = 0
+    last_sell_item = None
     trade_runner = (
         TradeRunner(PROJECT_PATH, delay_sec=1.0)
         if os.path.exists(PROJECT_PATH)
@@ -195,17 +210,41 @@ def main():
         _cleanup_debug_dir(DEBUG_DIR)
     last_dump_ts = time.monotonic()
     dump_index = 0
+    loop_count = 0
     with mss.mss() as sct:
         while True:
+            loop_count += 1
             last_config_mtime, overlay, state = _reload_config_if_changed(
                 PROJECT_PATH,
                 last_config_mtime,
                 overlay,
             )
             if state is not None:
-                ratios, triggers, currencies, matrix, currency_map = state
+                ratios, triggers, currencies, row_labels, col_labels, matrix, row_map, col_map, pairs = state
+                pair_index = 0
 
-            print(f"Count: {dump_index + 1}")
+            row_item = None
+            col_item = None
+            if pairs:
+                row_item, col_item = pairs[pair_index]
+            if trade_runner is not None and pairs:
+                try:
+                    if col_item != last_sell_item:
+                        trade_runner.run_trade(
+                            SELECT_SELL_TRADE,
+                            overrides={"itemName": col_item},
+                        )
+                        last_sell_item = col_item
+                    trade_runner.run_trade(
+                        SELECT_BUY_TRADE,
+                        overrides={"itemName": row_item},
+                    )
+                except Exception as exc:
+                    print(f"Trade automation failed: {exc}")
+                if AUTOMATION_SETTLE_SEC > 0:
+                    time.sleep(AUTOMATION_SETTLE_SEC)
+                pair_index = (pair_index + 1) % len(pairs)
+
             for rr in ratios:
                 img = np.array(sct.grab(rr.rect.as_mss()))[:, :, :3]
                 preps = get_ocr_preps(rr)
@@ -220,15 +259,36 @@ def main():
                         display = compute_display(c_raw, c_ratio, rr)
                         if display is not None:
                             break
+                effective_buy = rr.buy
+                effective_sell = rr.sell
+                if row_item and rr.buy.lower() == "market":
+                    effective_buy = row_item
+                if col_item and rr.sell.lower() == "market":
+                    effective_sell = col_item
+                label = rr.label
+                if effective_buy or effective_sell:
+                    label = f"{effective_buy} -> {effective_sell}".strip()
                 if display is None:
-                    print(f"{rr.label}: ?")
+                    print(f"{label}: ?")
                 else:
-                    print(f"{rr.label}: {format_decimals(display, 2)}")
-                    row = currency_map.get(rr.buy)
-                    col = currency_map.get(rr.sell)
+                    print(f"{label}: {format_decimals(display, 2)}")
+                    row = row_map.get(effective_buy)
+                    col = col_map.get(effective_sell)
                     if row is not None and col is not None:
-                        if 0 <= row < len(matrix) and 0 <= col < len(matrix):
+                        if 0 <= row < len(matrix) and 0 <= col < len(matrix[row]):
                             matrix[row][col] = display
+                            if sheet_ready:
+                                sheet_id = export_matrix_to_sheet(
+                                    col_labels,
+                                    matrix,
+                                    oauth_client_path="",
+                                    service_account_path=SHEET_SERVICE_ACCOUNT,
+                                    sheet_id=sheet_id,
+                                    sheet_name=SHEET_NAME,
+                                    sheet_title=SHEET_TITLE,
+                                    apply_format=False,
+                                    row_labels=row_labels,
+                                )
                 if display is not None:
                     for trig in triggers:
                         if str(trig.get("ratio")) != rr.key:
@@ -260,10 +320,9 @@ def main():
                     bin_img = prep_for_ocr(img, scale=rr.scale)
                     cv2.imwrite(raw_path, img)
                     cv2.imwrite(bin_path, bin_img)
-            print("===========")
-            if sheet_ready and (dump_index + 1) % SHEET_UPDATE_EVERY == 0:
+            if sheet_ready and loop_count % SHEET_UPDATE_EVERY == 0:
                 sheet_id = export_matrix_to_sheet(
-                    currencies,
+                    col_labels,
                     matrix,
                     oauth_client_path="",
                     service_account_path=SHEET_SERVICE_ACCOUNT,
@@ -271,6 +330,7 @@ def main():
                     sheet_name=SHEET_NAME,
                     sheet_title=SHEET_TITLE,
                     apply_format=False,
+                    row_labels=row_labels,
                 )
             if overlay is not None:
                 overlay.update_idletasks()
@@ -278,7 +338,11 @@ def main():
             if DEBUG_DUMP and (time.monotonic() - last_dump_ts >= DEBUG_DUMP_INTERVAL_SEC):
                 last_dump_ts = time.monotonic()
                 dump_index += 1
-            time.sleep(LOOP_DELAY_SEC)
+            sleep_sec = 0.0
+            if trade_runner is None or not pairs:
+                sleep_sec = LOOP_DELAY_SEC
+            if sleep_sec > 0:
+                time.sleep(sleep_sec)
 
 
 if __name__ == "__main__":
@@ -286,17 +350,5 @@ if __name__ == "__main__":
 
     if "--help" in sys.argv or "-h" in sys.argv:
         print(HELP_TEXT)
-        raise SystemExit(0)
-    if "--export-matrix" in sys.argv:
-        service_path = os.path.join(WEB_STUFF_DIR, "poe2trader-2e14fc353067.json")
-        sheet_id = export_cached_matrix(
-            oauth_client_path="",
-            service_account_path=service_path,
-            sheet_id=None,
-            sheet_name=SHEET_NAME,
-            sheet_title=SHEET_TITLE,
-            apply_format=True,
-        )
-        print(f"Sheet: https://docs.google.com/spreadsheets/d/{sheet_id}/edit")
         raise SystemExit(0)
     main()
