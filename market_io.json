@@ -1,0 +1,11 @@
+{
+  "clicks": [
+    {
+      "name": "example_buy",
+      "x": 0,
+      "y": 0,
+      "button": "left",
+      "modifiers": ["ctrl"]
+    }
+  ]
+}

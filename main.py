@@ -26,6 +26,7 @@ class Rect:
 class NamedRect:
     name: str
     rect: Rect
+    position: Optional[Tuple[int, int]]
     ocr_mode: str
     scale: float
     decimal_rule: str
@@ -33,12 +34,13 @@ class NamedRect:
     expected_min: Optional[float]
     expected_max: Optional[float]
     expected_integer_only: bool
+    debug_output: bool
     clean_min_area_ratio: float
     clean_left_margin_ratio: float
     clean_left_max_area_ratio: float
     clean_left_max_width: int
 
-CONFIG_PATH = os.path.join(os.path.dirname(__file__), "config.json")
+CONFIG_PATH = os.path.join(os.path.dirname(__file__), "ratios.json")
 REGION = Rect(x=1630, y=500, w=470, h=140)
 TEMPLATE_DIR = os.path.join(os.path.dirname(__file__), "characters")
 TEMPLATE_SCALE = 2.0
@@ -50,6 +52,7 @@ DEBUG_DUMP_INTERVAL_SEC = 2.0
 LOOP_INTERVAL_SEC = 2.0
 DEBUG_DIR = os.path.join(os.path.dirname(__file__), "debug_dumps")
 DEFAULTS = {
+    "position": None,
     "ocr_mode": "multi",
     "scale": 3.0,
     "decimal_rule": "",
@@ -57,6 +60,7 @@ DEFAULTS = {
     "expected_min": None,
     "expected_max": None,
     "expected_integer_only": False,
+    "debug_output": True,
     "clean_min_area_ratio": 0.0007,
     "clean_left_margin_ratio": 0.20,
     "clean_left_max_area_ratio": 0.0020,
@@ -65,9 +69,10 @@ DEFAULTS = {
 HELP_TEXT = """Usage:
   python main.py [--help]
 
-Per-ratio config fields (config.json):
+Per-ratio config fields (ratios.json):
   name: string (required)
   x, y, w, h: integers (required)
+  position: [row, col]
   ocr_mode: "multi" or "gray_only"
   scale: float (OCR resize scale)
   decimal_rule: "" or "tail_zero_two_dp"
@@ -75,6 +80,7 @@ Per-ratio config fields (config.json):
   expected_min: float
   expected_max: float
   expected_integer_only: true/false
+  debug_output: true/false
   clean_min_area_ratio: float
   clean_left_margin_ratio: float
   clean_left_max_area_ratio: float
@@ -112,6 +118,11 @@ def load_ratio_regions(path: str) -> Tuple[NamedRect, ...]:
             NamedRect(
                 name=str(r["name"]),
                 rect=Rect(int(r["x"]), int(r["y"]), int(r["w"]), int(r["h"])),
+                position=(
+                    (int(r["position"][0]), int(r["position"][1]))
+                    if "position" in r
+                    else DEFAULTS["position"]
+                ),
                 ocr_mode=str(r.get("ocr_mode", DEFAULTS["ocr_mode"])),
                 scale=float(r.get("scale", DEFAULTS["scale"])),
                 decimal_rule=str(r.get("decimal_rule", DEFAULTS["decimal_rule"])),
@@ -125,6 +136,7 @@ def load_ratio_regions(path: str) -> Tuple[NamedRect, ...]:
                 expected_integer_only=bool(
                     r.get("expected_integer_only", DEFAULTS["expected_integer_only"])
                 ),
+                debug_output=bool(r.get("debug_output", DEFAULTS["debug_output"])),
                 clean_min_area_ratio=float(
                     r.get("clean_min_area_ratio", DEFAULTS["clean_min_area_ratio"])
                 ),
@@ -600,12 +612,6 @@ def init_overlay(ratios: Tuple[NamedRect, ...]) -> tk.Tk:
     canvas = tk.Canvas(root, bg="magenta", highlightthickness=0)
     canvas.pack(fill="both", expand=True)
 
-    x0 = REGION.x
-    y0 = REGION.y
-    x1 = REGION.x + REGION.w
-    y1 = REGION.y + REGION.h
-    canvas.create_rectangle(x0, y0, x1, y1, outline="#ffffff", width=4)
-
     for rr in ratios:
         tx0 = rr.rect.x
         ty0 = rr.rect.y
@@ -621,6 +627,7 @@ def init_overlay(ratios: Tuple[NamedRect, ...]) -> tk.Tk:
 def main():
     configure_tesseract()
     ratios = load_ratio_regions(CONFIG_PATH)
+    last_config_mtime = os.path.getmtime(CONFIG_PATH) if os.path.exists(CONFIG_PATH) else 0.0
     global TEMPLATE_READER
     if any(r.use_templates for r in ratios):
         templates = load_templates()
@@ -637,6 +644,23 @@ def main():
     dump_index = 0
     with mss.mss() as sct:
         while True:
+            if os.path.exists(CONFIG_PATH):
+                mtime = os.path.getmtime(CONFIG_PATH)
+                if mtime != last_config_mtime:
+                    try:
+                        ratios = load_ratio_regions(CONFIG_PATH)
+                        last_config_mtime = mtime
+                        if overlay is not None:
+                            overlay.destroy()
+                        overlay = init_overlay(ratios)
+                        if any(r.use_templates for r in ratios):
+                            templates = load_templates()
+                            if templates:
+                                TEMPLATE_READER = FixedFontTemplateReader(templates)
+                        else:
+                            TEMPLATE_READER = None
+                    except Exception:
+                        pass
             print(f"Count: {dump_index + 1}")
             for rr in ratios:
                 img = np.array(sct.grab(rr.rect.as_mss()))[:, :, :3]
@@ -657,6 +681,8 @@ def main():
                 else:
                     print(f"{rr.name}: {format_decimals(display, 2)}")
                 for label, c_raw, c_ratio in candidates:
+                    if not rr.debug_output:
+                        continue
                     if c_ratio is None:
                         print(f"  {label}: raw='{c_raw}' value=?")
                     else:
