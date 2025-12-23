@@ -1,0 +1,22 @@
+{
+  "ratios": [
+    {
+      "name": "div_ex",
+      "x": 1910,
+      "y": 580,
+      "w": 60,
+      "h": 25,
+      "ocr_mode": "multi",
+      "scale": 3.0,
+      "decimal_rule": "",
+      "expected_integer_only": false,
+      "expected_min": 200,
+      "expected_max": 1000,
+      "use_templates": false,
+      "clean_min_area_ratio": 0.0007,
+      "clean_left_margin_ratio": 0.20,
+      "clean_left_max_area_ratio": 0.0020,
+      "clean_left_max_width": 2
+    }
+  ]
+}

@@ -30,6 +30,9 @@ class NamedRect:
     scale: float
     decimal_rule: str
     use_templates: bool
+    expected_min: Optional[float]
+    expected_max: Optional[float]
+    expected_integer_only: bool
     clean_min_area_ratio: float
     clean_left_margin_ratio: float
     clean_left_max_area_ratio: float
@@ -43,18 +46,43 @@ TEMPLATE_INVERT = True
 MATCH_THRESHOLD = 0.55
 MIN_COMPONENT_AREA_RATIO = 0.01
 DEBUG_DUMP = True
-DEBUG_EVERY_N = 5
+DEBUG_DUMP_INTERVAL_SEC = 2.0
+LOOP_INTERVAL_SEC = 2.0
 DEBUG_DIR = os.path.join(os.path.dirname(__file__), "debug_dumps")
 DEFAULTS = {
     "ocr_mode": "multi",
     "scale": 3.0,
     "decimal_rule": "",
     "use_templates": False,
+    "expected_min": None,
+    "expected_max": None,
+    "expected_integer_only": False,
     "clean_min_area_ratio": 0.0007,
     "clean_left_margin_ratio": 0.20,
     "clean_left_max_area_ratio": 0.0020,
     "clean_left_max_width": 2,
 }
+HELP_TEXT = """Usage:
+  python main.py [--help]
+
+Per-ratio config fields (config.json):
+  name: string (required)
+  x, y, w, h: integers (required)
+  ocr_mode: "multi" or "gray_only"
+  scale: float (OCR resize scale)
+  decimal_rule: "" or "tail_zero_two_dp"
+  use_templates: true/false
+  expected_min: float
+  expected_max: float
+  expected_integer_only: true/false
+  clean_min_area_ratio: float
+  clean_left_margin_ratio: float
+  clean_left_max_area_ratio: float
+  clean_left_max_width: int
+
+Example:
+  See config.example.json
+"""
 
 
 def configure_tesseract() -> None:
@@ -88,6 +116,15 @@ def load_ratio_regions(path: str) -> Tuple[NamedRect, ...]:
                 scale=float(r.get("scale", DEFAULTS["scale"])),
                 decimal_rule=str(r.get("decimal_rule", DEFAULTS["decimal_rule"])),
                 use_templates=bool(r.get("use_templates", DEFAULTS["use_templates"])),
+                expected_min=(
+                    float(r["expected_min"]) if "expected_min" in r else DEFAULTS["expected_min"]
+                ),
+                expected_max=(
+                    float(r["expected_max"]) if "expected_max" in r else DEFAULTS["expected_max"]
+                ),
+                expected_integer_only=bool(
+                    r.get("expected_integer_only", DEFAULTS["expected_integer_only"])
+                ),
                 clean_min_area_ratio=float(
                     r.get("clean_min_area_ratio", DEFAULTS["clean_min_area_ratio"])
                 ),
@@ -207,8 +244,12 @@ def format_decimals(value: float, places: int = 2) -> str:
 def apply_decimal_rule(raw: str, value: float, rule: str) -> float:
     if rule != "tail_zero_two_dp":
         return value
-    if "." in (raw or ""):
-        return value
+    raw = raw or ""
+    dot_pos = raw.find(".")
+    if dot_pos >= 0:
+        tail = raw[dot_pos + 1 :]
+        if any(ch.isdigit() for ch in tail):
+            return value
     digits = "".join(ch for ch in (raw or "") if ch.isdigit())
     if len(digits) < 2:
         return value
@@ -233,6 +274,62 @@ def coerce_full_number(raw: str, value: float) -> float:
         return float(digits)
     except Exception:
         return value
+
+
+def apply_expected_range(
+    raw: str,
+    value: float,
+    min_v: Optional[float],
+    max_v: Optional[float],
+    integer_only: bool,
+) -> Optional[float]:
+    if min_v is None or max_v is None:
+        return value
+    if min_v <= value <= max_v:
+        return value
+    digits = "".join(ch for ch in (raw or "") if ch.isdigit())
+    if len(digits) < 2:
+        return None
+    if integer_only:
+        for length in range(1, len(digits) + 1):
+            for start in range(0, len(digits) - length + 1):
+                chunk = digits[start : start + length]
+                try:
+                    v = float(chunk)
+                except Exception:
+                    continue
+                if min_v <= v <= max_v:
+                    return v
+        return None
+    best = None
+    for i in range(1, len(digits)):
+        candidate = digits[:i] + "." + digits[i:]
+        try:
+            v = float(candidate)
+        except Exception:
+            continue
+        if min_v <= v <= max_v:
+            best = v
+            break
+    return best
+
+
+def compute_display(raw: str, value: float, rr: NamedRect) -> Optional[float]:
+    display = coerce_full_number(raw, value)
+    if (
+        rr.expected_min is not None
+        and rr.expected_max is not None
+        and rr.expected_min <= display <= rr.expected_max
+    ):
+        return display
+    display = apply_decimal_rule(raw, display, rr.decimal_rule)
+    return apply_expected_range(
+        raw,
+        display,
+        rr.expected_min,
+        rr.expected_max,
+        rr.expected_integer_only,
+    )
 
 
 def ocr_candidates(
@@ -278,7 +375,8 @@ def read_ratio_from_image(
         if dot_pos >= 0:
             tail = candidate[dot_pos + 1 :]
             digits_after_dot = sum(1 for ch in tail if ch.isdigit())
-        score = (has_dot, digits_after_dot, len(digits), len(candidate.strip()))
+        dot_score = 1 if (has_dot and digits_after_dot > 0) else 0
+        score = (dot_score, digits_after_dot, len(digits), len(candidate.strip()))
         if score > best_score:
             best_score = score
             best_ratio = ratio
@@ -535,37 +633,57 @@ def main():
             path = os.path.join(DEBUG_DIR, name)
             if os.path.isfile(path):
                 os.remove(path)
-    tick = 0
+    last_dump_ts = time.monotonic()
+    dump_index = 0
     with mss.mss() as sct:
         while True:
+            print(f"Count: {dump_index + 1}")
             for rr in ratios:
                 img = np.array(sct.grab(rr.rect.as_mss()))[:, :, :3]
                 preps = get_ocr_preps(rr)
                 ratio, raw, candidates = read_ratio_from_image(img, preps, rr.use_templates)
-                if ratio is None:
+                display = None
+                if ratio is not None:
+                    display = compute_display(raw, ratio, rr)
+                if display is None:
+                    for _, c_raw, c_ratio in candidates:
+                        if c_ratio is None:
+                            continue
+                        display = compute_display(c_raw, c_ratio, rr)
+                        if display is not None:
+                            break
+                if display is None:
                     print(f"{rr.name}: ?")
                 else:
-                    display = coerce_full_number(raw, ratio)
-                    display = apply_decimal_rule(raw, display, rr.decimal_rule)
                     print(f"{rr.name}: {format_decimals(display, 2)}")
                 for label, c_raw, c_ratio in candidates:
                     if c_ratio is None:
                         print(f"  {label}: raw='{c_raw}' value=?")
                     else:
-                        adjusted = apply_decimal_rule(c_raw, c_ratio, rr.decimal_rule)
-                        print(f"  {label}: raw='{c_raw}' value={format_decimals(adjusted, 2)}")
-                if DEBUG_DUMP and (tick % DEBUG_EVERY_N == 0):
-                    raw_path = os.path.join(DEBUG_DIR, f"{rr.name}_{tick}_raw.png")
-                    bin_path = os.path.join(DEBUG_DIR, f"{rr.name}_{tick}_bin.png")
+                        adjusted = compute_display(c_raw, c_ratio, rr)
+                        if adjusted is None:
+                            print(f"  {label}: raw='{c_raw}' value=?")
+                        else:
+                            print(f"  {label}: raw='{c_raw}' value={format_decimals(adjusted, 2)}")
+                if DEBUG_DUMP and (time.monotonic() - last_dump_ts >= DEBUG_DUMP_INTERVAL_SEC):
+                    raw_path = os.path.join(DEBUG_DIR, f"{rr.name}_{dump_index}_raw.png")
+                    bin_path = os.path.join(DEBUG_DIR, f"{rr.name}_{dump_index}_bin.png")
                     bin_img = prep_for_ocr(img, scale=rr.scale)
                     cv2.imwrite(raw_path, img)
                     cv2.imwrite(bin_path, bin_img)
             print("===========")
             overlay.update_idletasks()
             overlay.update()
-            tick += 1
-            time.sleep(1.0)
+            if DEBUG_DUMP and (time.monotonic() - last_dump_ts >= DEBUG_DUMP_INTERVAL_SEC):
+                last_dump_ts = time.monotonic()
+                dump_index += 1
+            time.sleep(LOOP_INTERVAL_SEC)
 
 
 if __name__ == "__main__":
+    import sys
+
+    if "--help" in sys.argv or "-h" in sys.argv:
+        print(HELP_TEXT)
+        raise SystemExit(0)
     main()
