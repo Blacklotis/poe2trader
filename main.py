@@ -30,6 +30,7 @@ from matrix_export import export_matrix_to_sheet, load_matrix_from_cache, load_s
 
 DEBUG_DUMP = DEBUG_DUMP_DEFAULT
 DEBUG_DUMP_INTERVAL_SEC = DEBUG_DUMP_INTERVAL_SEC_DEFAULT
+LOOP_DELAY_SEC = DEBUG_DUMP_INTERVAL_SEC
 SHEET_SERVICE_ACCOUNT = SHEET_SERVICE_ACCOUNT_PATH
 SHEET_NAME = SHEET_NAME_DEFAULT
 SHEET_TITLE = SHEET_TITLE_DEFAULT
@@ -75,7 +76,6 @@ def configure_tesseract() -> None:
 
 
 
-
 def init_overlay(ratios: Tuple[NamedRect, ...]) -> tk.Tk:
     root = tk.Tk()
     root.overrideredirect(True)
@@ -102,6 +102,33 @@ def init_overlay(ratios: Tuple[NamedRect, ...]) -> tk.Tk:
     return root
 
 
+def _cleanup_debug_dir(debug_dir: str) -> None:
+    if not os.path.isdir(debug_dir):
+        return
+    for name in os.listdir(debug_dir):
+        path = os.path.join(debug_dir, name)
+        if not os.path.isfile(path):
+            continue
+        try:
+            os.remove(path)
+        except OSError as exc:
+            print(f"Failed to remove {path}: {exc}")
+
+
+def _create_overlay(ratios: Tuple[NamedRect, ...], existing: Optional[tk.Tk]) -> Optional[tk.Tk]:
+    try:
+        new_overlay = init_overlay(ratios)
+    except Exception as exc:
+        print(f"Failed to init overlay: {exc}")
+        return existing
+    if existing is not None:
+        try:
+            existing.destroy()
+        except Exception as exc:
+            print(f"Failed to destroy overlay: {exc}")
+    return new_overlay
+
+
 def _load_or_init_matrix(currencies: list[str]) -> list[list[Optional[float]]]:
     cached = load_matrix_from_cache()
     if cached:
@@ -114,6 +141,36 @@ def _load_or_init_matrix(currencies: list[str]) -> list[list[Optional[float]]]:
 
 def _currency_index_map(currencies: list[str]) -> dict[str, int]:
     return {str(name): idx for idx, name in enumerate(currencies)}
+
+
+def _reload_config_if_changed(
+    project_path: str,
+    last_mtime: float,
+    overlay: Optional[tk.Tk],
+) -> tuple[float, Optional[tk.Tk], Optional[tuple]]:
+    if not os.path.exists(project_path):
+        return last_mtime, overlay, None
+    try:
+        mtime = os.path.getmtime(project_path)
+    except OSError as exc:
+        print(f"Failed to stat config: {exc}")
+        return last_mtime, overlay, None
+    if mtime == last_mtime:
+        return last_mtime, overlay, None
+
+    try:
+        ratios = load_ratio_regions(project_path)
+        triggers = load_triggers(project_path)
+        currencies = load_currencies(project_path)
+    except Exception as exc:
+        print(f"Failed to reload config: {exc}")
+        return last_mtime, overlay, None
+
+    matrix = _load_or_init_matrix(currencies)
+    currency_map = _currency_index_map(currencies)
+    overlay = _create_overlay(ratios, overlay)
+    state = (ratios, triggers, currencies, matrix, currency_map)
+    return mtime, overlay, state
 
 
 def main():
@@ -135,29 +192,19 @@ def main():
     overlay = init_overlay(ratios)
     if DEBUG_DUMP:
         os.makedirs(DEBUG_DIR, exist_ok=True)
-        for name in os.listdir(DEBUG_DIR):
-            path = os.path.join(DEBUG_DIR, name)
-            if os.path.isfile(path):
-                os.remove(path)
+        _cleanup_debug_dir(DEBUG_DIR)
     last_dump_ts = time.monotonic()
     dump_index = 0
     with mss.mss() as sct:
         while True:
-            if os.path.exists(PROJECT_PATH):
-                mtime = os.path.getmtime(PROJECT_PATH)
-                if mtime != last_config_mtime:
-                    try:
-                        ratios = load_ratio_regions(PROJECT_PATH)
-                        triggers = load_triggers(PROJECT_PATH)
-                        currencies = load_currencies(PROJECT_PATH)
-                        matrix = _load_or_init_matrix(currencies)
-                        currency_map = _currency_index_map(currencies)
-                        last_config_mtime = mtime
-                        if overlay is not None:
-                            overlay.destroy()
-                        overlay = init_overlay(ratios)
-                    except Exception:
-                        pass
+            last_config_mtime, overlay, state = _reload_config_if_changed(
+                PROJECT_PATH,
+                last_config_mtime,
+                overlay,
+            )
+            if state is not None:
+                ratios, triggers, currencies, matrix, currency_map = state
+
             print(f"Count: {dump_index + 1}")
             for rr in ratios:
                 img = np.array(sct.grab(rr.rect.as_mss()))[:, :, :3]
@@ -225,12 +272,13 @@ def main():
                     sheet_title=SHEET_TITLE,
                     apply_format=False,
                 )
-            overlay.update_idletasks()
-            overlay.update()
+            if overlay is not None:
+                overlay.update_idletasks()
+                overlay.update()
             if DEBUG_DUMP and (time.monotonic() - last_dump_ts >= DEBUG_DUMP_INTERVAL_SEC):
                 last_dump_ts = time.monotonic()
                 dump_index += 1
-            time.sleep(DEBUG_DUMP_INTERVAL_SEC)
+            time.sleep(LOOP_DELAY_SEC)
 
 
 if __name__ == "__main__":

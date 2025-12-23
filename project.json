@@ -27,9 +27,9 @@
       "expected_min": 200,
       "expected_max": 300,
       "debug_output": false,
-      "clean_min_area_ratio": 0.0007,
-      "clean_left_margin_ratio": 0.2,
-      "clean_left_max_area_ratio": 0.002,
+      "clean_min_area_ratio": 0.01,
+      "clean_left_margin_ratio": 0.0,
+      "clean_left_max_area_ratio": 0.0,
       "clean_left_max_width": 2,
       "buy": "Divine Orb",
       "sell": "Exalted Orb"

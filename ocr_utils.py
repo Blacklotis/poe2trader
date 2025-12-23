@@ -1,3 +1,4 @@
+import re
 from typing import Optional, Tuple
 
 import cv2
@@ -79,12 +80,18 @@ def prep_gray(img_bgr: np.ndarray, scale: float = 3.0) -> np.ndarray:
 
 
 def parse_ratio(text: str) -> Optional[float]:
-    s = (text or "").replace(" ", "").replace(";", ":").replace(",", ".")
+    s = (text or "").replace(";", ":").replace(",", ".")
     if not s:
         return None
+    match = re.search(r"([0-9]+(?:\.[0-9]+)?)\s*[:/xX]\s*([0-9]+(?:\.[0-9]+)?)", s)
+    if match:
+        try:
+            return float(match.group(2))
+        except Exception:
+            return None
     filtered = []
     dot_used = False
-    for ch in s:
+    for ch in s.replace(" ", ""):
         if ch.isdigit():
             filtered.append(ch)
             continue
@@ -98,6 +105,7 @@ def parse_ratio(text: str) -> Optional[float]:
         return float(cleaned)
     except Exception:
         return None
+
 
 
 def format_decimals(value: float, places: int = 2) -> str:
@@ -177,17 +185,41 @@ def apply_expected_range(
     return best
 
 
+def _split_ratio_raw(raw: str) -> tuple[str, Optional[str]]:
+    if not raw:
+        return raw, None
+    match = re.search(r"1\s*[:/xX]\s*([0-9][0-9\.,]*)", raw)
+    if not match:
+        match = re.search(r"1\s+([0-9][0-9\.,]*)", raw)
+    if match:
+        return raw, match.group(1)
+    if ":" not in raw:
+        return raw, None
+    parts = raw.split(":")
+    if len(parts) < 2:
+        return raw, None
+    rhs = ":".join(parts[1:])
+    return raw, rhs.strip()
+
+
 def compute_display(raw: str, value: float, rr) -> Optional[float]:
-    display = coerce_full_number(raw, value)
+    raw_full, rhs_raw = _split_ratio_raw(raw)
+    raw_for_rules = rhs_raw or raw_full
+    base_value = value
+    if rhs_raw:
+        rhs_value = parse_ratio(rhs_raw)
+        if rhs_value is not None:
+            base_value = rhs_value
+    display = coerce_full_number(raw_for_rules, base_value)
     if (
         rr.expected_min is not None
         and rr.expected_max is not None
         and rr.expected_min <= display <= rr.expected_max
     ):
         return display
-    display = apply_decimal_rule(raw, display, rr.decimal_rule)
+    display = apply_decimal_rule(raw_for_rules, display, rr.decimal_rule)
     return apply_expected_range(
-        raw,
+        raw_for_rules,
         display,
         rr.expected_min,
         rr.expected_max,
@@ -200,7 +232,7 @@ def ocr_candidates(
     preps: Tuple[Tuple[str, callable], ...],
 ) -> Tuple[Tuple[str, str, Optional[float]], ...]:
     cfg = (
-        "--oem 1 --psm 8 -c tessedit_char_whitelist=0123456789. "
+        "--oem 1 --psm 8 -c tessedit_char_whitelist=0123456789.:/xX "
         "-c classify_bln_numeric_mode=1 -c user_defined_dpi=300"
     )
     candidates = []
@@ -219,19 +251,20 @@ def read_ratio_from_image(
     candidates = ocr_candidates(img_bgr, preps)
     best_ratio = None
     best_raw = ""
-    best_score = (-1, -1, -1, -1)
+    best_score = (-1, -1, -1, -1, -1)
     for _, candidate, ratio in candidates:
         if ratio is None:
             continue
         digits = "".join(ch for ch in candidate if ch.isdigit())
         has_dot = 1 if "." in candidate else 0
+        has_sep = 1 if any(ch in candidate for ch in (":", "/", "x", "X")) else 0
         dot_pos = candidate.find(".")
         digits_after_dot = 0
         if dot_pos >= 0:
             tail = candidate[dot_pos + 1 :]
             digits_after_dot = sum(1 for ch in tail if ch.isdigit())
         dot_score = 1 if (has_dot and digits_after_dot > 0) else 0
-        score = (dot_score, digits_after_dot, len(digits), len(candidate.strip()))
+        score = (has_sep, dot_score, digits_after_dot, len(digits), len(candidate.strip()))
         if score > best_score:
             best_score = score
             best_ratio = ratio
