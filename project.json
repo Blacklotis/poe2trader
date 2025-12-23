@@ -2,10 +2,10 @@
   "ratios": [
     {
       "name": "market",
-      "x": 2110,
-      "y": 302,
-      "w": 60,
-      "h": 30,
+      "x": 2100,
+      "y": 304,
+      "w": 80,
+      "h": 25,
       "position": [
         0,
         1
@@ -14,14 +14,9 @@
       "scale": 3.0,
       "decimal_rule": "",
       "expected_integer_only": true,
-      "expected_min": 0,
+      "expected_min": 2,
       "expected_max": 1000,
-      "debug_output": true,
-      "use_templates": false,
-      "clean_min_area_ratio": 0.0007,
-      "clean_left_margin_ratio": 0.2,
-      "clean_left_max_area_ratio": 0.002,
-      "clean_left_max_width": 2
+      "debug_output": true
     },
     {
       "name": "div_ex",
@@ -40,7 +35,6 @@
       "expected_min": 200,
       "expected_max": 300,
       "debug_output": true,
-      "use_templates": false,
       "clean_min_area_ratio": 0.0007,
       "clean_left_margin_ratio": 0.2,
       "clean_left_max_area_ratio": 0.002,
@@ -48,22 +42,21 @@
     },
     {
       "name": "gex_ex",
-      "x": 2395,
+      "x": 2405,
       "y": 580,
-      "w": 60,
+      "w": 50,
       "h": 25,
       "position": [
         1,
         0
       ],
       "ocr_mode": "multi",
-      "scale": 4.0,
+      "scale": 3.0,
       "decimal_rule": "tail_zero_two_dp",
       "expected_integer_only": false,
       "expected_min": 1,
       "expected_max": 10,
       "debug_output": true,
-      "use_templates": false,
       "clean_min_area_ratio": 0.0007,
       "clean_left_margin_ratio": 0.2,
       "clean_left_max_area_ratio": 0.002,
@@ -147,18 +140,7 @@
     }
   ],
   "triggers": [
-    {
-      "ratio": "gex_ex",
-      "op": ">",
-      "value": 4.0,
-      "trade": "select_sell"
-    },
-    {
-      "ratio": "gex_ex",
-      "op": "<",
-      "value": 4.0,
-      "trade": "select_buy"
-    }
+
   ],
   "currencies": [
     "Blacksmith's Whetstone",
