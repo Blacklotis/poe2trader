@@ -1,0 +1,14 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Run poe2trader (Windows Python)",
+      "type": "python",
+      "request": "launch",
+      "program": "${workspaceFolder}/main.py",
+      "python": "C:\\Users\\Mark\\AppData\\Local\\Microsoft\\WindowsApps\\python3.12.exe",
+      "console": "integratedTerminal",
+      "cwd": "${workspaceFolder}"
+    }
+  ]
+}

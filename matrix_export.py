@@ -6,6 +6,9 @@ from typing import List, Optional
 from project_config import SHEET_TITLE_DEFAULT, WEB_STUFF_DIR
 SHEET_ID_PATH = os.path.join(WEB_STUFF_DIR, "price_matrix_sheet.json")
 DEFAULT_SHEET_TITLE = SHEET_TITLE_DEFAULT
+FEEDBACK_HEADERS = ("Correct Divine Orb", "Correct Exalted Orb")
+FEEDBACK_START_COL = 4
+FEEDBACK_END_COL = 5
 
 
 def _matrix_to_values(
@@ -43,17 +46,7 @@ def load_sheet_id() -> Optional[str]:
     return str(data.get("spreadsheetId", "")) or None
 
 
-def export_matrix_to_sheet(
-    currencies: List[str],
-    matrix: List[List[Optional[float]]],
-    oauth_client_path: str,
-    service_account_path: str,
-    sheet_id: Optional[str],
-    sheet_name: str,
-    sheet_title: str,
-    apply_format: bool,
-    row_labels: Optional[List[str]] = None,
-) -> str:
+def _build_sheet_service(service_account_path: str, oauth_client_path: str):
     try:
         from google.oauth2.credentials import Credentials
         from google.oauth2.service_account import Credentials as ServiceCredentials
@@ -78,7 +71,21 @@ def export_matrix_to_sheet(
             with open(token_path, "w", encoding="utf-8") as f:
                 f.write(creds.to_json())
 
-    service = build("sheets", "v4", credentials=creds)
+    return build("sheets", "v4", credentials=creds)
+
+
+def export_matrix_to_sheet(
+    currencies: List[str],
+    matrix: List[List[Optional[float]]],
+    oauth_client_path: str,
+    service_account_path: str,
+    sheet_id: Optional[str],
+    sheet_name: str,
+    sheet_title: str,
+    apply_format: bool,
+    row_labels: Optional[List[str]] = None,
+) -> str:
+    service = _build_sheet_service(service_account_path, oauth_client_path)
 
     if not sheet_id:
         body = {"properties": {"title": sheet_title}}
@@ -116,6 +123,11 @@ def export_matrix_to_sheet(
             "values": [header],
         },
     ]
+    feedback_header_range = (
+        f"{_a1(top_offset_rows + 1, FEEDBACK_START_COL)}:"
+        f"{_a1(top_offset_rows + 1, FEEDBACK_END_COL)}"
+    )
+    requests.append({"range": feedback_header_range, "values": [list(FEEDBACK_HEADERS)]})
     if data_rows:
         end_cell = _a1(top_offset_rows + 1 + len(data_rows), len(header))
         requests.append(
@@ -238,6 +250,8 @@ def export_matrix_to_sheet(
                 base = max(140, min(320, 8 * len(name) + 40))
                 if idx == 0:
                     base = max(base, 220)
+
+
                 requests.append(
                     {
                         "updateDimensionProperties": {
@@ -296,3 +310,38 @@ def export_matrix_to_sheet(
             ).execute()
 
     return sheet_id
+
+
+def read_feedback_columns(
+    sheet_id: str,
+    sheet_name: str,
+    service_account_path: str,
+    oauth_client_path: str,
+    header_row: int = 6,
+    first_data_row: int = 7,
+    start_col: int = 4,
+    end_col: int = 5,
+) -> List[List[str]]:
+    service = _build_sheet_service(service_account_path, oauth_client_path)
+    start_cell = _a1(first_data_row, start_col)
+    end_cell = _a1(1000, end_col)
+    range_name = f"{sheet_name}!{start_cell}:{end_cell}"
+    resp = service.spreadsheets().values().get(
+        spreadsheetId=sheet_id,
+        range=range_name,
+    ).execute()
+    return resp.get("values", [])
+
+
+def clear_sheet(
+    sheet_id: str,
+    sheet_name: str,
+    service_account_path: str,
+    oauth_client_path: str,
+) -> None:
+    service = _build_sheet_service(service_account_path, oauth_client_path)
+    service.spreadsheets().values().clear(
+        spreadsheetId=sheet_id,
+        range=sheet_name,
+        body={},
+    ).execute()

@@ -1,3 +1,4 @@
+import json
 import re
 from typing import Optional, Tuple
 
@@ -79,6 +80,41 @@ def prep_gray(img_bgr: np.ndarray, scale: float = 3.0) -> np.ndarray:
     return g
 
 
+def prep_gray_no_blur(img_bgr: np.ndarray, scale: float = 3.0) -> np.ndarray:
+    g = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2GRAY)
+    if scale != 1.0:
+        g = cv2.resize(g, None, fx=scale, fy=scale, interpolation=cv2.INTER_CUBIC)
+    return g
+
+
+OCR_WEIGHTS = {}
+
+
+def set_ocr_weights(weights: dict) -> None:
+    global OCR_WEIGHTS
+    OCR_WEIGHTS = dict(weights or {})
+
+
+def load_ocr_weights(path: str) -> dict:
+    if not path:
+        return {}
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        return dict(data) if isinstance(data, dict) else {}
+    except FileNotFoundError:
+        return {}
+    except Exception:
+        return {}
+
+
+def save_ocr_weights(path: str, weights: dict) -> None:
+    if not path:
+        return
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(weights, f, indent=2, sort_keys=True)
+
+
 def parse_ratio(text: str) -> Optional[float]:
     s = (text or "").replace(";", ":").replace(",", ".")
     if not s:
@@ -135,6 +171,27 @@ def apply_decimal_rule(raw: str, value: float, rule: str) -> float:
         return value
 
 
+def coerce_ratio_merged_one(raw: str, min_v: float, max_v: float) -> Optional[float]:
+    digits = "".join(ch for ch in (raw or "") if ch.isdigit())
+    if len(digits) < 3:
+        return None
+    candidates = []
+    if digits.endswith("1"):
+        candidates.append(digits[:-1])
+    if digits.startswith("1"):
+        candidates.append(digits[1:])
+    for candidate in candidates:
+        if not candidate:
+            continue
+        try:
+            value = float(candidate)
+        except Exception:
+            continue
+        if min_v <= value <= max_v:
+            return value
+    return None
+
+
 def coerce_full_number(raw: str, value: float) -> float:
     if value >= 1.0:
         return value
@@ -185,12 +242,50 @@ def apply_expected_range(
     return best
 
 
+def _within_range(value: float, min_v: Optional[float], max_v: Optional[float]) -> bool:
+    if min_v is None or max_v is None:
+        return True
+    return min_v <= value <= max_v
+
+
+def _drop_leading_one(text: str) -> Optional[float]:
+    if not text or not text.startswith("1"):
+        return None
+    candidate = text[1:].strip()
+    if not candidate:
+        return None
+    if candidate.startswith("."):
+        candidate = "0" + candidate
+    try:
+        return float(candidate)
+    except Exception:
+        return None
+
+
+def _swap_two_digits(text: str) -> Optional[float]:
+    digits = "".join(ch for ch in (text or "") if ch.isdigit())
+    if len(digits) != 2:
+        return None
+    swapped = digits[1] + digits[0]
+    try:
+        return float(swapped)
+    except Exception:
+        return None
+
+
 def _split_ratio_raw(raw: str) -> tuple[str, Optional[str]]:
     if not raw:
         return raw, None
-    match = re.search(r"1\s*[:/xX]\s*([0-9][0-9\.,]*)", raw)
-    if not match:
-        match = re.search(r"1\s+([0-9][0-9\.,]*)", raw)
+    match = re.search(r"([0-9][0-9\.,]*)\s*[:/xX]\s*([0-9][0-9\.,]*)", raw)
+    if match:
+        lhs_raw = match.group(1)
+        rhs_raw = match.group(2)
+        lhs_value = parse_ratio(lhs_raw)
+        rhs_value = parse_ratio(rhs_raw)
+        if rhs_value == 1 and lhs_value is not None:
+            return raw, lhs_raw
+        return raw, rhs_raw
+    match = re.search(r"1\s+([0-9][0-9\.,]*)", raw)
     if match:
         return raw, match.group(1)
     if ":" not in raw:
@@ -210,6 +305,25 @@ def compute_display(raw: str, value: float, rr) -> Optional[float]:
         rhs_value = parse_ratio(rhs_raw)
         if rhs_value is not None:
             base_value = rhs_value
+        lhs_raw = None
+        match = re.search(r"([0-9][0-9\.,]*)\s*[:/xX]\s*([0-9][0-9\.,]*)", raw_full)
+        if match:
+            lhs_raw = match.group(1)
+            rhs_match = match.group(2)
+            rhs_match_value = parse_ratio(rhs_match)
+            if rhs_match_value == 1 and lhs_raw:
+                dropped = _drop_leading_one(lhs_raw)
+                swapped = _swap_two_digits(lhs_raw)
+                candidates = []
+                if dropped is not None and _within_range(dropped, rr.expected_min, rr.expected_max):
+                    candidates.append(dropped)
+                if swapped is not None and _within_range(swapped, rr.expected_min, rr.expected_max):
+                    candidates.append(swapped)
+                if candidates:
+                    if rr.expected_min is not None and rr.expected_max is not None:
+                        mid = (rr.expected_min + rr.expected_max) / 2.0
+                        candidates.sort(key=lambda v: abs(v - mid))
+                    return candidates[0]
     display = coerce_full_number(raw_for_rules, base_value)
     if (
         rr.expected_min is not None
@@ -217,6 +331,14 @@ def compute_display(raw: str, value: float, rr) -> Optional[float]:
         and rr.expected_min <= display <= rr.expected_max
     ):
         return display
+    if (
+        rr.expected_min is not None
+        and rr.expected_max is not None
+        and not any(ch in (raw_for_rules or "") for ch in (":", "/", "x", "X", "."))
+    ):
+        merged = coerce_ratio_merged_one(raw_for_rules, rr.expected_min, rr.expected_max)
+        if merged is not None:
+            return merged
     display = apply_decimal_rule(raw_for_rules, display, rr.decimal_rule)
     return apply_expected_range(
         raw_for_rules,
@@ -231,16 +353,35 @@ def ocr_candidates(
     img_bgr: np.ndarray,
     preps: Tuple[Tuple[str, callable], ...],
 ) -> Tuple[Tuple[str, str, Optional[float]], ...]:
-    cfg = (
-        "--oem 1 --psm 8 -c tessedit_char_whitelist=0123456789.:/xX "
-        "-c classify_bln_numeric_mode=1 -c user_defined_dpi=300"
+    cfgs = (
+        (
+            "psm7",
+            "--oem 1 --psm 7 -c tessedit_char_whitelist=0123456789.:/xX "
+            "-c classify_bln_numeric_mode=1 -c user_defined_dpi=300",
+        ),
+        (
+            "psm8",
+            "--oem 1 --psm 8 -c tessedit_char_whitelist=0123456789.:/xX "
+            "-c classify_bln_numeric_mode=1 -c user_defined_dpi=300",
+        ),
+        (
+            "psm6",
+            "--oem 1 --psm 6 -c tessedit_char_whitelist=0123456789.:/xX "
+            "-c classify_bln_numeric_mode=1 -c user_defined_dpi=300",
+        ),
+        (
+            "psm13",
+            "--oem 1 --psm 13 -c tessedit_char_whitelist=0123456789.:/xX "
+            "-c classify_bln_numeric_mode=1 -c user_defined_dpi=300",
+        ),
     )
     candidates = []
     for label, prep in preps:
         g = prep(img_bgr)
-        raw = pytesseract.image_to_string(g, config=cfg) or ""
-        ratio = parse_ratio(raw)
-        candidates.append((label, raw.strip(), ratio))
+        for cfg_label, cfg in cfgs:
+            raw = pytesseract.image_to_string(g, config=cfg) or ""
+            ratio = parse_ratio(raw)
+            candidates.append((f"{label}:{cfg_label}", raw.strip(), ratio))
     return tuple(candidates)
 
 
@@ -264,7 +405,8 @@ def read_ratio_from_image(
             tail = candidate[dot_pos + 1 :]
             digits_after_dot = sum(1 for ch in tail if ch.isdigit())
         dot_score = 1 if (has_dot and digits_after_dot > 0) else 0
-        score = (has_sep, dot_score, digits_after_dot, len(digits), len(candidate.strip()))
+        weight = OCR_WEIGHTS.get(_, 0)
+        score = (weight, has_sep, dot_score, digits_after_dot, -len(digits), -len(candidate.strip()))
         if score > best_score:
             best_score = score
             best_ratio = ratio
@@ -277,6 +419,9 @@ def read_ratio_from_image(
 def get_ocr_preps(rr) -> Tuple[Tuple[str, callable], ...]:
     def gray():
         return lambda img, scale=rr.scale: prep_gray(img, scale=scale)
+
+    def gray_no_blur():
+        return lambda img, scale=rr.scale: prep_gray_no_blur(img, scale=scale)
 
     def bin_no_denoise():
         return lambda img, scale=rr.scale: prep_for_ocr_no_denoise(img, scale=scale)
@@ -295,7 +440,7 @@ def get_ocr_preps(rr) -> Tuple[Tuple[str, callable], ...]:
         return lambda img, scale=rr.scale: prep_for_ocr(img, scale=scale)
 
     if rr.ocr_mode == "gray_only":
-        return (("gray", gray()),)
+        return (("gray", gray()), ("gray_no_blur", gray_no_blur()))
     return (
         ("gray", gray()),
         ("bin", bin_no_denoise()),
