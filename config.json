@@ -1,0 +1,8 @@
+{
+  "ratios": 
+  [    
+    { "name": "div_ex", "x": 1910, "y": 580, "w": 60, "h": 25 },
+    { "name": "gex_ex", "x": 2395, "y": 580, "w": 60, "h": 25, "ocr_mode": "gray_only", "scale": 4.0, "decimal_rule": "tail_zero_two_dp" },
+    { "name": "pje_ex", "x": 1910, "y": 735, "w": 60, "h": 25, "ocr_mode": "gray_only", "scale": 4.0}
+  ]
+}
