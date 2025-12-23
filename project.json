@@ -1,0 +1,92 @@
+{
+  "ratios": [
+    {
+      "name": "market",
+      "x": 2110,
+      "y": 302,
+      "w": 60,
+      "h": 30,
+      "position": [0, 1],
+      "ocr_mode": "multi",
+      "scale": 3.0,
+      "decimal_rule": "",
+      "expected_integer_only": true,
+      "expected_min": 0,
+      "expected_max": 1000,
+      "debug_output": true,
+      "use_templates": false,
+      "clean_min_area_ratio": 0.0007,
+      "clean_left_margin_ratio": 0.20,
+      "clean_left_max_area_ratio": 0.0020,
+      "clean_left_max_width": 2
+    },
+    {
+      "name": "div_ex",
+      "x": 1910,
+      "y": 580,
+      "w": 60,
+      "h": 25,
+      "position": [0, 0],
+      "ocr_mode": "multi",
+      "scale": 3.0,
+      "decimal_rule": "",
+      "expected_integer_only": false,
+      "expected_min": 200,
+      "expected_max": 300,
+      "debug_output": true,
+      "use_templates": false,
+      "clean_min_area_ratio": 0.0007,
+      "clean_left_margin_ratio": 0.20,
+      "clean_left_max_area_ratio": 0.0020,
+      "clean_left_max_width": 2
+    },
+    {
+      "name": "gex_ex",
+      "x": 2395,
+      "y": 580,
+      "w": 60,
+      "h": 25,
+      "position": [1, 0],
+      "ocr_mode": "multi",
+      "scale": 4.0,
+      "decimal_rule": "tail_zero_two_dp",
+      "expected_integer_only": false,
+      "expected_min": 1,
+      "expected_max": 10,
+      "debug_output": true,
+      "use_templates": false,
+      "clean_min_area_ratio": 0.0007,
+      "clean_left_margin_ratio": 0.20,
+      "clean_left_max_area_ratio": 0.0020,
+      "clean_left_max_width": 2
+    }
+  ],
+  "trades": [
+    {
+      "name": "select_sell",
+      "itemName": "Scroll of Wisdom",
+      "actions": [
+        { "type": "click", "x": 2440, "y": 315, "button": "left", "modifiers": [] },
+        { "type": "click", "x": 2215, "y": 1250, "button": "left", "modifiers": [] },
+        { "type": "type", "text": "{itemName}", "method": "paste", "key_delay_sec": 0.01 },
+        { "type": "delay", "seconds": 0.5 },
+        { "type": "click", "x": 2250, "y": 250, "button": "left", "modifiers": [] }
+      ]
+    },
+    {
+      "name": "select_buy",
+      "itemName": "Scroll of Wisdom",
+      "actions": [
+        { "type": "click", "x": 1750, "y": 315, "button": "left", "modifiers": [] },
+        { "type": "click", "x": 2215, "y": 1250, "button": "left", "modifiers": [] },
+        { "type": "type", "text": "{itemName}", "method": "paste", "key_delay_sec": 0.01 },
+        { "type": "delay", "seconds": 0.5 },
+        { "type": "click", "x": 2250, "y": 250, "button": "left", "modifiers": [] }
+      ]
+    }
+  ],
+  "triggers": [
+    { "ratio": "2", "op": ">", "value": 4.0, "trade": "select_sell" },
+    { "ratio": "2", "op": "<", "value": 4.0, "trade": "select_buy" }
+  ]
+}

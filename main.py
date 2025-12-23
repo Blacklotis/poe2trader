@@ -1,7 +1,7 @@
 import json
 import time
 from dataclasses import dataclass
-from typing import Dict, Optional, Tuple
+from typing import Dict, Optional, Tuple, List
 
 import os
 import cv2
@@ -9,6 +9,8 @@ import mss
 import numpy as np
 import pytesseract
 import tkinter as tk
+
+from trades import TradeRunner
 
 
 @dataclass(frozen=True)
@@ -40,7 +42,9 @@ class NamedRect:
     clean_left_max_area_ratio: float
     clean_left_max_width: int
 
-CONFIG_PATH = os.path.join(os.path.dirname(__file__), "ratios.json")
+
+PROJECT_PATH = os.path.join(os.path.dirname(__file__), "project.json")
+CONFIG_PATH = PROJECT_PATH
 REGION = Rect(x=1630, y=500, w=470, h=140)
 TEMPLATE_DIR = os.path.join(os.path.dirname(__file__), "characters")
 TEMPLATE_SCALE = 2.0
@@ -49,7 +53,6 @@ MATCH_THRESHOLD = 0.55
 MIN_COMPONENT_AREA_RATIO = 0.01
 DEBUG_DUMP = True
 DEBUG_DUMP_INTERVAL_SEC = 2.0
-LOOP_INTERVAL_SEC = 2.0
 DEBUG_DIR = os.path.join(os.path.dirname(__file__), "debug_dumps")
 DEFAULTS = {
     "position": None,
@@ -66,10 +69,12 @@ DEFAULTS = {
     "clean_left_max_area_ratio": 0.0020,
     "clean_left_max_width": 2,
 }
+TRADES_PATH = PROJECT_PATH
+TRIGGERS = []
 HELP_TEXT = """Usage:
   python main.py [--help]
 
-Per-ratio config fields (ratios.json):
+Per-ratio config fields (project.json -> ratios):
   name: string (required)
   x, y, w, h: integers (required)
   position: [row, col]
@@ -152,6 +157,19 @@ def load_ratio_regions(path: str) -> Tuple[NamedRect, ...]:
             )
         )
     return tuple(regions)
+
+
+def load_triggers(path: str) -> List[Dict[str, object]]:
+    if not os.path.exists(path):
+        return []
+    with open(path, "r", encoding="utf-8") as f:
+        cfg = json.load(f)
+    out: List[Dict[str, object]] = []
+    for t in cfg.get("triggers", []):
+        if not isinstance(t, dict):
+            continue
+        out.append(t)
+    return out
 
 
 def prep_for_ocr(img_bgr: np.ndarray, scale: float = 3.0) -> np.ndarray:
@@ -627,6 +645,13 @@ def init_overlay(ratios: Tuple[NamedRect, ...]) -> tk.Tk:
 def main():
     configure_tesseract()
     ratios = load_ratio_regions(CONFIG_PATH)
+    triggers = load_triggers(CONFIG_PATH)
+    trade_runner = (
+        TradeRunner(TRADES_PATH, delay_sec=1.0, project_path=PROJECT_PATH)
+        if os.path.exists(TRADES_PATH)
+        else None
+    )
+    trigger_state = {}
     last_config_mtime = os.path.getmtime(CONFIG_PATH) if os.path.exists(CONFIG_PATH) else 0.0
     global TEMPLATE_READER
     if any(r.use_templates for r in ratios):
@@ -649,6 +674,7 @@ def main():
                 if mtime != last_config_mtime:
                     try:
                         ratios = load_ratio_regions(CONFIG_PATH)
+                        triggers = load_triggers(CONFIG_PATH)
                         last_config_mtime = mtime
                         if overlay is not None:
                             overlay.destroy()
@@ -680,6 +706,20 @@ def main():
                     print(f"{rr.name}: ?")
                 else:
                     print(f"{rr.name}: {format_decimals(display, 2)}")
+                if display is not None:
+                    for trig in triggers:
+                        if trig.get("ratio") != rr.name:
+                            continue
+                        op = str(trig.get("op", ">"))
+                        target = float(trig.get("value", 0.0))
+                        is_true = display > target if op == ">" else display < target
+                        was_true = trigger_state.get(rr.name, False)
+                        if is_true and not was_true and trade_runner is not None:
+                            trade_runner.run_trade(
+                                str(trig.get("trade", "")),
+                                overrides=trig.get("overrides"),
+                            )
+                        trigger_state[rr.name] = is_true
                 for label, c_raw, c_ratio in candidates:
                     if not rr.debug_output:
                         continue
@@ -703,7 +743,7 @@ def main():
             if DEBUG_DUMP and (time.monotonic() - last_dump_ts >= DEBUG_DUMP_INTERVAL_SEC):
                 last_dump_ts = time.monotonic()
                 dump_index += 1
-            time.sleep(LOOP_INTERVAL_SEC)
+            time.sleep(DEBUG_DUMP_INTERVAL_SEC)
 
 
 if __name__ == "__main__":
