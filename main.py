@@ -47,6 +47,7 @@ PROJECT_PATH = os.path.join(os.path.dirname(__file__), "project.json")
 CONFIG_PATH = PROJECT_PATH
 REGION = Rect(x=1630, y=500, w=470, h=140)
 TEMPLATE_DIR = os.path.join(os.path.dirname(__file__), "characters")
+TEMPLATE_READER = None
 TEMPLATE_SCALE = 2.0
 TEMPLATE_INVERT = True
 MATCH_THRESHOLD = 0.55
@@ -613,7 +614,7 @@ def load_templates() -> Dict[str, np.ndarray]:
     return mapping
 
 
-TEMPLATE_READER = None
+
 
 
 def init_overlay(ratios: Tuple[NamedRect, ...]) -> tk.Tk:
